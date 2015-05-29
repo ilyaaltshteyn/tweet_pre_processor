@@ -77,6 +77,19 @@ class tweetDatabase:
         self.tweets = tweets
 
     def strip_and_lower(self):
+        for tweet in range(len(self.tweets)):
+            t = singleTweet(self.tweets[tweet])
+            t.strip_and_lower()
+            self.tweets[tweet] = t.tweet
+
+    def identify_spam(self):
+        """Cluster tweets and throw out nearly-identical ones. Gets rid both
+        of spam tweets and of unofficial retweets."""
+
+import re
+from sklearn.neighbors import KDTree
+
+
 
 
 #    def remove_spam
