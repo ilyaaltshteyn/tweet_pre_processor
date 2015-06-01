@@ -2,7 +2,9 @@
 import re
 import string
 from sklearn.neighbors import LSHForest
+from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 class singleTweet:
     """Allows basic operations to be performed on a single tweet. Must import
@@ -56,7 +58,7 @@ class singleTweet:
         """Uses regex to remove anything that looks like a link in the tweet.
         Identifies text that looks like a tweet using URL suffixes."""
 
-        self.tweet = urls.sub('', self.tweet)
+        self.tweet = self.urls.sub('', self.tweet)
 
     def lowercase(self):
         """Converts tweet to all lowercase characters."""
@@ -90,13 +92,94 @@ class tweetDatabase:
         """Cluster tweets and throw out nearly-identical ones. Gets rid both
         of spam tweets and of unofficial retweets."""
 
-tweets = ['hello mom this is a tweet thing', 'hello dad this is a tweet thing', 
-          'i am random ok', 'and i am not ok']
-X = CountVectorizer(tweets)
-tree = LSHForest()
-tree.fit(X)
+# Pull some tweets from my mongo database. Note: tweets that are being pulled are all from the same 1-week period.
+from pymongo import MongoClient
+client = MongoClient()
+db = client.tweets
+collect = db.test_collection #change this be the right collection!
+
+tweets = collect.find({'computer_classified' : 1})
+
+tweet_db_main = []
+ind = 0
+for t in tweets:
+    ind +=1
+    if ind == 10000: break
+    tweet_db_main.append(t['text'])
+
+tweets = tweetDatabase(tweet_db_main)
+tweets.strip_and_lower()
+tweet_db_main = tweets.tweets
+
+# Try different batch sizes to find out how many tweets to cluster at a time:
+import time, numpy as np
+import random
+
+def tweets_batch_maker(all_tweets, batch_size):
+    random.shuffle(all_tweets)
+    tweets_to_return = []
+    for t in range(batch_size):
+        tweets_to_return.append(all_tweets[t])
+    return tweets_to_return
+
+def single_batch(tweet_db):
+
+    # Vectorize and fit tree:
+    timer = time.time()
+    vect2 = TfidfVectorizer()
+    X2 = vect2.fit_transform(tweet_db)
+    tree2 = LSHForest()
+    tree2.fit(X2)
+    print "that took %2f seconds" % (time.time()-timer)
+
+    # Build tree:
+    timer = time.time()
+    n_neighbors = []
+    neighbors_indices = []
+    for x in vect2.transform(tweet_db):
+        if len(n_neighbors) % 100 == 0: print len(n_neighbors)
+        neighbors = tree2.radius_neighbors(x, radius = .3)[1]
+        n_neighbors.append(len(neighbors[0]))
+        neighbors_indices.append(neighbors)
+    tree_build_time = (time.time() - timer)
+
+    # Find neighbors:
+    l = list(n_neighbors)
+    l = [l.index(x) for x in l if x > 1]
+    # Get indices of the tweets that are parts of close clusters:
+    len_l = len(set(l))
+    actual_neighbors =[]
+    for x in set(l):
+        for neigh in neighbors_indices[x][0]:
+            actual_neighbors.append(tweet_db[neigh])
+
+    return np.mean(n_neighbors), actual_neighbors, len_l, tree_build_time
+
+mean_neighbor_counts = []
+cluster_counts = []
+build_times = []
+neighb_counts = []
+for x in [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]:
+    tweets_db = tweets_batch_maker(tweet_db_main, x)
+    mean_neighbor_count, neighbs, cluster_count, build_time = single_batch(tweets_db)
+    mean_neighbor_counts.append(mean_neighbor_count)
+    cluster_counts.append(cluster_count)
+    build_times.append(build_time)
+    neighb_counts.append(len(neighbs))
 
 
+# Plot some of the stuff above
+from matplotlib import pyplot as plt
+import seaborn as sns
+sns.set(palette = sns.color_palette(style = 'white')
+
+c = np.array([1000, 2000, 4000, 6000, 8000, 10000])
+t = np.array(build_times)
+plt.plot(c/t)
+plt.show()
+
+    # Possible add version that use:
+    # Agglomerative clustering?
+    # Or dbscan?
 
 
-#    def remove_spam
