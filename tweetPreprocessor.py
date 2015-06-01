@@ -1,4 +1,8 @@
 # This is a simple tool for pre-processing tweets in large tweet databases.
+import re
+import string
+from sklearn.neighbors import LSHForest
+from sklearn.feature_extraction.text import CountVectorizer
 
 class singleTweet:
     """Allows basic operations to be performed on a single tweet. Must import
@@ -86,8 +90,11 @@ class tweetDatabase:
         """Cluster tweets and throw out nearly-identical ones. Gets rid both
         of spam tweets and of unofficial retweets."""
 
-import re
-from sklearn.neighbors import KDTree
+tweets = ['hello mom this is a tweet thing', 'hello dad this is a tweet thing', 
+          'i am random ok', 'and i am not ok']
+X = CountVectorizer(tweets)
+tree = LSHForest()
+tree.fit(X)
 
 
 
