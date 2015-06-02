@@ -1,10 +1,10 @@
 # This is a simple tool for pre-processing tweets in large tweet databases.
-import re
-import string
+import copy, math, re, string
 from sklearn.neighbors import LSHForest
 from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
+import numpy as np
 
 class singleTweet:
     """Allows basic operations to be performed on a single tweet. Must import
@@ -78,54 +78,74 @@ class singleTweet:
 class tweetDatabase:
     """Takes a list of tweets as input and does operations on the entire list
     all at once."""
+    import copy, math, re, string
+    from sklearn.neighbors import LSHForest
+    from sklearn.feature_extraction.text import HashingVectorizer
+    from sklearn.feature_extraction.text import CountVectorizer
+    from sklearn.feature_extraction.text import TfidfVectorizer
 
-    def __init__(self, tweets, batch_size):
+    # Initialize some variables that need to be empty but will be updated by
+    # functions later on:
+    spam_tweets = []
+    spam_indices = []
+    tweets_modified = []
+
+    def __init__(self, tweets, batch_size = 25000):
         self.tweets = tweets
         self.batch_size = batch_size
-        self.tweets_modified = []
 
-    def strip_and_lower(self, apply_on_copy = 1):
-        if apply_on_copy = 0:
+    def strip_and_lower(self, tweets = None, apply_on_copy = 1):
+        if apply_on_copy == 0:
             for tweet in range(len(self.tweets)):
                 t = singleTweet(self.tweets[tweet])
                 t.strip_and_lower()
                 self.tweets[tweet] = t.tweet
         else:
-            for tweet in range(len(self.tweets)):
-                    t = singleTweet(self.tweets[tweet])
-                    t.strip_and_lower()
-                    self.tweets_modified[tweet] = t.tweet
+            tweets_to_return = []
+            for tweet in range(len(tweets)):
+                t = singleTweet(tweets[tweet])
+                t.strip_and_lower()
+                tweets_to_return.append(t.tweet)
+            return tweets_to_return
 
 
-    def tweets_batch_maker(self, all_tweets, batch_size):
+    def tweets_batch_maker(self, all_tweets):
         """Returns a list of tuples. Each tuple is a batch of tweets (length = batch_size)
         and those same tweets, stripped and lowercased. Each batch of tweets is a list."""
-        import copy, math
 
-        batches = int(math.ceil(len(all_tweets)/batch_size))
+        batches = int(self.math.ceil(len(all_tweets)/float(self.batch_size)))
+
         list_of_batches = []
         start = 0
         for batch in range(batches):
-            end = start + batch_size
+            end = start + self.batch_size
             if end < len(all_tweets):
                 tweet_batch = all_tweets[start:end]
+                
             else: 
                 tweet_batch = all_tweets[start:]
                 
+
             # Clean them up (lowercase everything, strip links, etc):
-            stripped_lowered_tweets = self.strip_and_lower(copy.copy(tweet_batch))
+            stripped_lowered_tweets = self.strip_and_lower(tweets = tweet_batch, apply_on_copy = 1)
+            
             list_of_batches.append((tweet_batch, stripped_lowered_tweets))
-            start += batch_size
+            
+            
+            start += self.batch_size
+            print "start = %r" % start
 
         return list_of_batches
 
     def single_batch(self, tweets):
         """Performs an approximate nearest neighbors search on tweets in the database
         passed to it. The database must be a list of tweets (text of the tweets only).
+        
         Returns the mean number of neighbors (nearly-identical tweets) that a given
         tweet has, the tweets that are considered neighbors (i.e. spam), the number
         of tweets that are spam (number of tweets with at least 1 other neighbor),
         and the amount of time that it took to run the search on the database."""
+        import time
 
         # Vectorize and fit tree:
         timer = time.time()
@@ -133,9 +153,9 @@ class tweetDatabase:
         X2 = vect2.fit_transform(tweets)
         tree2 = LSHForest()
         tree2.fit(X2)
-        print "that took %2f seconds" % (time.time()-timer)
+        
 
-        # Build tree:
+    # Build tree:
         timer = time.time()
         n_neighbors = []
         neighbors_indices = []
@@ -150,14 +170,9 @@ class tweetDatabase:
         l = list(n_neighbors)
         l = [l.index(x) for x in l if x > 2]
 
-        # Get indices of the tweets that are parts of close clusters:
-        len_l = len(set(l))
-        actual_neighbors =[]
-        for x in set(l):
-            for neigh in neighbors_indices[x][0]:
-                actual_neighbors.append(tweets[neigh])
+        neighbors_indices = [x for x in range(len(neighbors_indices)) if len(neighbors_indices[x][0]) > 1]
 
-        return np.mean(n_neighbors), actual_neighbors, len_l, tree_build_time, neighbors_indices
+        return np.mean(n_neighbors), tree_build_time, neighbors_indices
 
     def identify_spam(self):
         
@@ -167,6 +182,15 @@ class tweetDatabase:
         tweets, it passes each batch to the single_batch function. It then sets
         the class-level self.spam_indices to the indices of the spam tweets in
         the self.tweets database."""
+
+        batches = self.tweets_batch_maker(self.tweets)
+        batch_num = 0
+        for batch in batches:
+            _, tree_build_time, neighbors_indices = self.single_batch(batch[1])
+            print neighbors_indices
+            self.spam_tweets.extend([self.tweets[t + batch_num*self.batch_size] for t in neighbors_indices])
+            self.spam_indices.extend([x + batch_num*self.batch_size for x in neighbors_indices])
+            batch_num += 1
 
 
 
@@ -185,8 +209,11 @@ tweet_db_main = []
 ind = 0
 for t in tweets:
     ind +=1
-    if ind == 50000: break
+    if ind == 3000: break
     tweet_db_main.append(t['text'])
+
+test = tweetDatabase(tweets = tweet_db_main, batch_size = 3000)
+
 
 # Try different batch sizes to find out how many tweets to cluster at a time:
 import time, numpy as np
