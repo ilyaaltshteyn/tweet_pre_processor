@@ -5,6 +5,7 @@ from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 import numpy as np
+from sklearn.feature_extraction import text
 
 class singleTweet:
     """Allows basic operations to be performed on a single tweet. Must import
@@ -153,15 +154,14 @@ class tweetDatabase:
         X2 = vect2.fit_transform(tweets)
         tree2 = LSHForest()
         tree2.fit(X2)
-        
 
-    # Build tree:
+        # Build tree:
         timer = time.time()
         n_neighbors = []
         neighbors_indices = []
         for x in vect2.transform(tweets):
             if len(n_neighbors) % 100 == 0: print len(n_neighbors)
-            neighbors = tree2.radius_neighbors(x, radius = .3)[1]
+            neighbors = tree2.radius_neighbors(x, radius = .25)[1]
             n_neighbors.append(len(neighbors[0]))
             neighbors_indices.append(neighbors)
         tree_build_time = (time.time() - timer)
@@ -172,7 +172,7 @@ class tweetDatabase:
 
         neighbors_indices = [x for x in range(len(neighbors_indices)) if len(neighbors_indices[x][0]) > 1]
 
-        return np.mean(n_neighbors), tree_build_time, neighbors_indices
+        return tree_build_time, neighbors_indices
 
     def identify_spam(self):
         
@@ -186,7 +186,7 @@ class tweetDatabase:
         batches = self.tweets_batch_maker(self.tweets)
         batch_num = 0
         for batch in batches:
-            _, tree_build_time, neighbors_indices = self.single_batch(batch[1])
+            tree_build_time, neighbors_indices = self.single_batch(batch[1])
             print neighbors_indices
             self.spam_tweets.extend([self.tweets[t + batch_num*self.batch_size] for t in neighbors_indices])
             self.spam_indices.extend([x + batch_num*self.batch_size for x in neighbors_indices])
@@ -209,10 +209,15 @@ tweet_db_main = []
 ind = 0
 for t in tweets:
     ind +=1
-    if ind == 3000: break
+    if ind == 10000: break
     tweet_db_main.append(t['text'])
 
-test = tweetDatabase(tweets = tweet_db_main, batch_size = 3000)
+test = tweetDatabase(tweets = tweet_db_main, batch_size = 10000)
+test.identify_spam()
+print len(test.spam_tweets)
+with open('afternoon_test.txt', 'w') as outfile:
+    for t in test.spam_tweets:
+        outfile.write(t + '\n')
 
 
 # Try different batch sizes to find out how many tweets to cluster at a time:
