@@ -98,15 +98,17 @@ client = MongoClient()
 db = client.tweets
 collect = db.test_collection #change this be the right collection!
 
-tweets = collect.find({'computer_classified' : 1})
+tweets = collect.find()
 
+# Get the first 10k tweets out of the mongo result. Only keep tweet text:
 tweet_db_main = []
 ind = 0
 for t in tweets:
     ind +=1
-    if ind == 10000: break
+    if ind == 50000: break
     tweet_db_main.append(t['text'])
 
+# Clean them up (lowercase everything, strip links, etc):
 tweets = tweetDatabase(tweet_db_main)
 tweets.strip_and_lower()
 tweet_db_main = tweets.tweets
@@ -116,6 +118,8 @@ import time, numpy as np
 import random
 
 def tweets_batch_maker(all_tweets, batch_size):
+    """Returns random subset (length = batch_size) of list of tweets (all_tweets)."""
+
     random.shuffle(all_tweets)
     tweets_to_return = []
     for t in range(batch_size):
@@ -123,6 +127,12 @@ def tweets_batch_maker(all_tweets, batch_size):
     return tweets_to_return
 
 def single_batch(tweet_db):
+    """Performs an approximate nearest neighbors search on tweets in the database
+    passed to it. The database must be a list of tweets (text of the tweets only).
+    Returns the mean number of neighbors (nearly-identical tweets) that a given
+    tweet has, the tweets that are considered neighbors (i.e. spam), the number
+    of tweets that are spam (number of tweets with at least 1 other neighbor),
+    and the amount of time that it took to run the search on the database."""
 
     # Vectorize and fit tree:
     timer = time.time()
@@ -145,7 +155,8 @@ def single_batch(tweet_db):
 
     # Find neighbors:
     l = list(n_neighbors)
-    l = [l.index(x) for x in l if x > 1]
+    l = [l.index(x) for x in l if x > 2]
+
     # Get indices of the tweets that are parts of close clusters:
     len_l = len(set(l))
     actual_neighbors =[]
@@ -155,11 +166,17 @@ def single_batch(tweet_db):
 
     return np.mean(n_neighbors), actual_neighbors, len_l, tree_build_time
 
+def remove_non_ascii(text):
+    return ''.join([i if ord(i) < 128 else ' ' for i in text])
+
+# Run the above functions on batches of tweets of varying sizes. This will tell
+# you how large of batches to cut your tweet databases into in order to process
+# the spam out of them.
 mean_neighbor_counts = []
 cluster_counts = []
 build_times = []
 neighb_counts = []
-for x in [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]:
+for x in [5000, 10000, 15000, 20000, 25000, 30000]:
     tweets_db = tweets_batch_maker(tweet_db_main, x)
     mean_neighbor_count, neighbs, cluster_count, build_time = single_batch(tweets_db)
     mean_neighbor_counts.append(mean_neighbor_count)
@@ -167,16 +184,66 @@ for x in [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]:
     build_times.append(build_time)
     neighb_counts.append(len(neighbs))
 
+    # Write a sample of spam tweets to a file:
+    with open(str(x) + 'tweet_bbucket_spam_sample.txt', 'w') as outfile:
+        for x in neighbs:
+            x = remove_non_ascii(x)
+            outfile.write(x + '\n')
 
-# Plot some of the stuff above
+print mean_neighbor_counts
+print cluster_counts
+print build_times
+print neighb_counts
+
+# Write the output of the entire job to a text file:
+details = "Mean neighbor counts: %r \n\
+           Cluster_counts: %r \n\
+           Build_times: %r \n\
+           Neighb_counts: %r" % (mean_neighbor_counts, cluster_counts, build_times, neighb_counts)
+
+with open('details_of_testing_job.txt', 'w') as outfile:
+    outfile.write(details)
+
+#                     ***Plot some of the stuff above***
 from matplotlib import pyplot as plt
 import seaborn as sns
-sns.set(palette = sns.color_palette(style = 'white')
+sns.set(style = 'white')
 
-c = np.array([1000, 2000, 4000, 6000, 8000, 10000])
-t = np.array(build_times)
-plt.plot(c/t)
-plt.show()
+# Convert the numbers outputted above into numbers for plots:
+batch_sizes = np.array([5000, 10000, 15000, 20000, 25000, 30000]) # The batch sizes that were tested.
+mean_neighbor_counts = np.array(mean_neighbor_counts)
+cluster_counts = np.array(cluster_counts) # Represents how many types of spam
+build_times = np.array(build_times)
+neighb_counts = np.array(neighb_counts) # Total number of spam pieces
+
+seconds_per_tweet = build_times/batch_sizes # Plot against batch_sizes
+percent_spam = neighb_counts/batch_sizes # Plot against batch_sizes
+
+# Make a few separate plots:
+plt.plot(batch_sizes, seconds_per_tweet)
+plt.title("Seconds per tweet when processing tweets through an approximate nearest\n neighbors algorithm as a function of how many tweets were in the bucket", fontsize = 15)
+plt.xlabel("Number of tweets in bucket searched", fontsize = 15)
+plt.ylabel("Seconds per tweet", fontsize = 15)
+plt.savefig("fig1_overnight_run.pdf")
+
+plt.plot(batch_sizes, percent_spam)
+plt.title("Percent spam tweets in buckets (groups of tweets) of varying sizes", fontsize = 16)
+plt.xlabel("Number of tweets in bucket searched", fontsize = 15)
+plt.ylabel("Percent of the tweets that are spam", fontsize = 15)
+plt.savefig("fig2overnight_run.pdf")
+
+plt.plot(batch_sizes, cluster_counts)
+plt.title("Number of spam types detected in buckets of varying sizes", fontsize = 16)
+plt.xlabel("Number of tweets in bucket searched", fontsize = 15)
+plt.ylabel("Number of spam types discovered", fontsize = 15)
+plt.savefig("fig3overnight_run.pdf")
+
+plt.plot(batch_sizes, build_times)
+plt.title("Time it takes to find spam in tweet buckets of varying sizes", fontsize = 16)
+plt.xlabel("Number of tweets in bucket searched", fontsize = 15)
+plt.ylabel("Time it took to discover spam", fontsize = 15)
+plt.savefig("fig4overnight_run.pdf")
+
 
     # Possible add version that use:
     # Agglomerative clustering?
