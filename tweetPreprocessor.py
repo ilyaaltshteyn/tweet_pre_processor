@@ -1,8 +1,8 @@
 # This is a simple tool for pre-processing tweets in large tweet databases.
-import copy, math, re, string
+import math
+import re
+import string
 from sklearn.neighbors import LSHForest
-from sklearn.feature_extraction.text import HashingVectorizer
-from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 import numpy as np
 from sklearn.feature_extraction import text
@@ -16,14 +16,14 @@ class singleTweet:
     
     .tweet               Returns the tweet as a string.
     .strip_non_ascii()   Strips non-ascii characters from the tweet string.
-    .strip_punctuation   Strips punctuation. If strip_hashtags is set to False,
+    .strip_punctuation() Strips punctuation. If strip_hashtags is set to False,
                          then it does NOT strip hashtags. Otherwise, strips them.
-    .utf8                Converts the tweet to utf-8 if possible.
+    .utf8()              Converts the tweet to utf-8 if possible.
     .urls                The regex used to match urls. Modify as needed.
     .strip_links()       Strips links by using regex to sub out any words that
                          contain 'http' or any of a number of suffixes contained
                          in self.urls
-    .lowercase           Converts tweet to all lowercase."""
+    .lowercase()         Converts tweet to all lowercase."""
     
     def __init__(self, tweet):
         self.tweet = tweet
@@ -77,19 +77,60 @@ class singleTweet:
 
 
 class tweetDatabase:
-    """Takes a list of tweets as input and does operations on the entire list
-    all at once."""
-    import copy, math, re, string
-    from sklearn.neighbors import LSHForest
-    from sklearn.feature_extraction.text import HashingVectorizer
-    from sklearn.feature_extraction.text import CountVectorizer
-    from sklearn.feature_extraction.text import TfidfVectorizer
+    """Takes a list of tweets as input and does operations on the entire list.
+    Inside, it's doing the operations on batches of the tweets. 
+
+    When initializing, you can set the batch_size. The larger the batch_size, 
+    the slower the spam detection will run, but the more spam it will capture. 
+    Batch sizes larger than 30,000 tweets don't lead to significantly more spam 
+    detected. Batch sizes smaller than 5,000 detect less than 1/3 of all possible 
+    spam.
+                ------------------------------------------------
+    Useful methods (not all methods, bc some are for internal use):
+    
+    .tweets             The original tweets that it took as input
+    .batch_size         How many tweets the spam detector looks through to 
+                        discover spam tweets.
+    .strip_and_lower()  If apply_on_copy is set to 1 (default) then it returns 
+                        stripped and lowercased tweets. Uses the singleTweet 
+                        class's strip_and_lower function. If apply_on_copy is 
+                        set to 0, then .tweets_modified becomes the stripped 
+                        and lowercased tweets.
+    .tweets_modified    Where to find the stripped and lowercased tweets if you 
+                        ran .strip_and_lower with apply_on_copy = 0
+    .identify_spam()    Run this function to identify spam.
+    .spam_tweets        This is the spam tweets discovered by .identify_spam()
+    .spam_indices       This is the indices of the spam tweets in the original
+                        dataset that you fed into the class.
+    """
 
     # Initialize some variables that need to be empty but will be updated by
     # functions later on:
     spam_tweets = []
+    spam_tweets_stripped_and_lowered = []
     spam_indices = []
     tweets_modified = []
+
+    common_twitter_handles = ['katyperry', 'justinbieber', 'barackobama', \
+    'taylorswift13', 'youtube', 'ladygaga', 'rihanna', 'jtimberlake', 'theellenshow', \
+    'britneyspears', 'instagram', 'twitter', 'cristiano', 'jlo', 'kimkardashian', \
+    'shakira', 'arianagrande', 'selenagomez', 'ddlovato', 'oprah', 'cnnbrk', 'pink', \
+    'jimmyfallon', 'harrystyles', 'onedirection', 'liltunechi', 'kaka', 'drake', \
+    'officialadele', 'niallofficial', 'aliciakeys', 'billgates', 'brunomars', \
+    'pitbull', 'realliampayne', 'kingjames', 'wizkhalifa', 'louistomlinson', \
+    'mileycyrus', 'eminem', 'nickiminaj', 'avrillavigne', 'espn', 'neymarjr', \
+    'emwatson', 'kevinhart4real', 'cnn', 'davidguetta', 'danieltosh', 'aplusk', \
+    'sportscenter', 'nytimes', 'conanobrien', 'actuallynph', 'mariahcarey', 'realmadrid', \
+    'xtina', 'zaynmalik', 'srbachchan', 'coldplay', 'fcbarcelona', 'kourtneykardash', \
+    'twitteres', 'nba', 'chrisbrown', 'vine', 'beyonce', 'jimcarrey', 'bbcbreaking', \
+    'khloekardashian', 'facebook', 'edsheeran', 'iamsrk', 'parishilton', 'ryanseacrest', \
+    'iamwill', 'ashleytisdale', 'agnezmo', 'narendramodi', 'leodicaprio', 'ivetesangalo', \
+    'tyrabanks', 'alejandrosanz', 'ubersoc', 'mtv', 'blakeshelton', 'snoopdogg', \
+    'aamirkhan', 'rickymartin', 'simoncowell', 'kanyewest', 'mohamadalarefe', \
+    'beingsalmankhan', '10ronaldinho', 'charliesheen', 'google', 'nfl', 'waynerooney', \
+    'claudialeitte', 'dalailam']
+
+    stop_words = text.ENGLISH_STOP_WORDS.union(common_twitter_handles)
 
     def __init__(self, tweets, batch_size = 25000):
         self.tweets = tweets
@@ -108,7 +149,6 @@ class tweetDatabase:
                 t.strip_and_lower()
                 tweets_to_return.append(t.tweet)
             return tweets_to_return
-
 
     def tweets_batch_maker(self, all_tweets):
         """Returns a list of tuples. Each tuple is a batch of tweets (length = batch_size)
@@ -142,29 +182,24 @@ class tweetDatabase:
         """Performs an approximate nearest neighbors search on tweets in the database
         passed to it. The database must be a list of tweets (text of the tweets only).
         
-        Returns the mean number of neighbors (nearly-identical tweets) that a given
-        tweet has, the tweets that are considered neighbors (i.e. spam), the number
-        of tweets that are spam (number of tweets with at least 1 other neighbor),
-        and the amount of time that it took to run the search on the database."""
-        import time
+        Returns the indices of tweets with nearby neighbors (i.e. spam tweets).
+        These indices correspond to indices within the batch of tweets fed to
+        this function."""
 
         # Vectorize and fit tree:
-        timer = time.time()
-        vect2 = TfidfVectorizer()
+        vect2 = TfidfVectorizer(stop_words = self.stop_words)
         X2 = vect2.fit_transform(tweets)
         tree2 = LSHForest()
         tree2.fit(X2)
 
         # Build tree:
-        timer = time.time()
         n_neighbors = []
         neighbors_indices = []
         for x in vect2.transform(tweets):
             if len(n_neighbors) % 100 == 0: print len(n_neighbors)
-            neighbors = tree2.radius_neighbors(x, radius = .25)[1]
+            neighbors = tree2.radius_neighbors(x, radius = .28)[1]
             n_neighbors.append(len(neighbors[0]))
             neighbors_indices.append(neighbors)
-        tree_build_time = (time.time() - timer)
 
         # Find neighbors:
         l = list(n_neighbors)
@@ -172,7 +207,7 @@ class tweetDatabase:
 
         neighbors_indices = [x for x in range(len(neighbors_indices)) if len(neighbors_indices[x][0]) > 1]
 
-        return tree_build_time, neighbors_indices
+        return neighbors_indices
 
     def identify_spam(self):
         
@@ -186,14 +221,23 @@ class tweetDatabase:
         batches = self.tweets_batch_maker(self.tweets)
         batch_num = 0
         for batch in batches:
-            tree_build_time, neighbors_indices = self.single_batch(batch[1])
+            neighbors_indices = self.single_batch(batch[1])
             print neighbors_indices
             self.spam_tweets.extend([self.tweets[t + batch_num*self.batch_size] for t in neighbors_indices])
             self.spam_indices.extend([x + batch_num*self.batch_size for x in neighbors_indices])
             batch_num += 1
 
+    def strip_and_lower_spam(self):
+        """Applies teh strip and lower function to the spam tweets and puts the
+        stripped and lowered spam tweets into the .spam_tweets_stripped_and_lowered
+        object. If sort isn't turned to 0, it'll also sort them for easy viewing."""
+        
+        for tweet in range(len(self.spam_tweets)):
+                t = singleTweet(self.spam_tweets[tweet])
+                t.strip_and_lower()
+                self.spam_tweets_stripped_and_lowered.append(t.tweet)
 
-
+        self.spam_tweets_stripped_and_lowered = sorted(self.spam_tweets_stripped_and_lowered)
 
 
 # Pull some tweets from my mongo database. Note: tweets that are being pulled are all from the same 1-week period.
@@ -209,124 +253,15 @@ tweet_db_main = []
 ind = 0
 for t in tweets:
     ind +=1
-    if ind == 10000: break
+    if ind == 1000: break
     tweet_db_main.append(t['text'])
 
-test = tweetDatabase(tweets = tweet_db_main, batch_size = 10000)
+test = tweetDatabase(tweets = tweet_db_main, batch_size = 1000)
 test.identify_spam()
 print len(test.spam_tweets)
-with open('afternoon_test.txt', 'w') as outfile:
-    for t in test.spam_tweets:
-        outfile.write(t + '\n')
 
-
-# Try different batch sizes to find out how many tweets to cluster at a time:
-import time, numpy as np
-import random
-
-
-
-
-
-def get_raw_clusters(raw_tweets):
-    """Returns a tuple. First element is tweets that are part of clusters, and
-    second element is their indices."""
-
-    raw_tweets, tweets_db = tweets_batch_maker(tweet_db_main, 1000)
-    mean_neighbor_count, neighbs, cluster_count, build_time, neighbors_ixs = single_batch(tweets_db)
-    # Get the indices of clustered elements:
-    spam_tweet_indices = [x for x in range(len(neighbors_ixs)) if len(neighbors_ixs[x][0]) > 2]
-    spam_tweets = [raw_tweets[x] for x in spam_tweet_indices]
-
-    return spam_tweets, spam_tweet_indices
-
-mean_neighbor_counts.append(mean_neighbor_count)
-cluster_counts.append(cluster_count)
-build_times.append(build_time)
-neighb_counts.append(len(neighbs))
-neighb_indices.append(neighbors_ixs)
-
-    # Write a sample of spam tweets to a file:
-    with open('june2_tweet_bbucket_spam_sample.txt', 'w') as outfile:
-        for x in neighbs:
-            x = remove_non_ascii(x)
-            outfile.write(x + '\n')
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# OVERNIGHT RUN AND PLOTTING STUFF:
-
-# Numbers from the overnight run:
-mean_neighbor_counts = [2.3612000000000002, 3.0836999999999999, 4.1913333333333336, 5.1238000000000001, 6.2468000000000004, 7.6730333333333336]
-cluster_counts = [26, 46, 59, 62, 92, 93]
-build_times = [372.1215100288391, 1498.7616021633148, 2518.6462161540985, 3320.9114871025085, 4941.027271032333, 6961.048699855804]
-neighb_counts = [721, 1951, 3363, 4386, 7356, 8778]
-
-
-
-# Write the output of the entire job to a text file:
-details = "Mean neighbor counts: %r \n\
-           Cluster_counts: %r \n\
-           Build_times: %r \n\
-           Neighb_counts: %r" % (mean_neighbor_counts, cluster_counts, build_times, neighb_counts)
-
-with open('details_of_testing_job.txt', 'w') as outfile:
-    outfile.write(details)
-
-#                     ***Plot some of the stuff above***
-from matplotlib import pyplot as plt
-import seaborn as sns
-sns.set(style = 'white')
-
-# Convert the numbers outputted above into numbers for plots:
-batch_sizes = np.array([5000, 10000, 15000, 20000, 25000, 30000]) # The batch sizes that were tested.
-mean_neighbor_counts = np.array(mean_neighbor_counts)
-cluster_counts = np.array(cluster_counts) # Represents how many types of spam
-build_times = np.array(build_times)
-neighb_counts = np.array(neighb_counts) # Total number of spam pieces
-
-seconds_per_tweet = build_times/batch_sizes # Plot against batch_sizes
-percent_spam = neighb_counts/batch_sizes # Plot against batch_sizes
-
-# Make a few separate plots:
-plt.plot(batch_sizes, seconds_per_tweet)
-plt.title("Seconds per tweet when processing tweets through an approximate nearest\n neighbors algorithm as a function of how many tweets were in the bucket", fontsize = 15)
-plt.xlabel("Number of tweets in bucket searched", fontsize = 15)
-plt.ylabel("Seconds per tweet", fontsize = 15)
-plt.savefig("fig1_overnight_run.pdf")
-
-plt.plot(batch_sizes, percent_spam)
-plt.title("Percent spam tweets in buckets (groups of tweets) of varying sizes", fontsize = 16)
-plt.xlabel("Number of tweets in bucket searched", fontsize = 15)
-plt.ylabel("Percent of the tweets that are spam", fontsize = 15)
-plt.savefig("fig2overnight_run.pdf")
-
-plt.plot(batch_sizes, cluster_counts)
-plt.title("Number of spam types detected in buckets of varying sizes", fontsize = 16)
-plt.xlabel("Number of tweets in bucket searched", fontsize = 15)
-plt.ylabel("Number of spam types discovered", fontsize = 15)
-plt.savefig("fig3overnight_run.pdf")
-
-plt.plot(batch_sizes, build_times)
-plt.title("Time it takes to find spam in tweet buckets of varying sizes", fontsize = 16)
-plt.xlabel("Number of tweets in bucket searched", fontsize = 15)
-plt.ylabel("Time it took to discover spam", fontsize = 15)
-plt.savefig("fig4overnight_run.pdf")
-
-
-    # Possible add version that use:
-    # Agglomerative clustering?
-    # Or dbscan?
+test.strip_and_lower_spam()
+for x in test.spam_tweets_stripped_and_lowered:
+    print x
 
 
