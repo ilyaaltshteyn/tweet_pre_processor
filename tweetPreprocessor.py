@@ -3,7 +3,7 @@ import math
 import re
 import string
 from sklearn.neighbors import LSHForest
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer
 import numpy as np
 from sklearn.feature_extraction import text
 
@@ -23,7 +23,12 @@ class singleTweet:
     .strip_links()       Strips links by using regex to sub out any words that
                          contain 'http' or any of a number of suffixes contained
                          in self.urls
-    .lowercase()         Converts tweet to all lowercase."""
+    .lowercase()         Converts tweet to all lowercase.
+    .strip_newlines()    Strips newline characters from the tweet.
+    .strip_and_lower()   Performs all stripping functions (including stripping 
+                         non-ascii chars) and lowercases the tweet. Does NOT 
+                         convert it to utf-8.
+    """
     
     def __init__(self, tweet):
         self.tweet = tweet
@@ -66,6 +71,11 @@ class singleTweet:
 
         self.tweet = self.tweet.lower()
 
+    def strip_newlines(self):
+        """Strips newline characters from tweet."""
+
+        self.tweet = self.tweet.replace('\n', '')
+
     def strip_and_lower(self):
         """Performs all stripping functions (including stripping non-ascii chars)
         and lowercases the tweet. Does NOT convert it to utf-8."""
@@ -74,6 +84,7 @@ class singleTweet:
         self.strip_links()
         self.lowercase()
         self.strip_punctuation()
+        self.strip_newlines()
 
 
 class tweetDatabase:
@@ -88,20 +99,27 @@ class tweetDatabase:
                 ------------------------------------------------
     Useful methods (not all methods, bc some are for internal use):
     
-    .tweets             The original tweets that it took as input
-    .batch_size         How many tweets the spam detector looks through to 
-                        discover spam tweets.
-    .strip_and_lower()  If apply_on_copy is set to 1 (default) then it returns 
-                        stripped and lowercased tweets. Uses the singleTweet 
-                        class's strip_and_lower function. If apply_on_copy is 
-                        set to 0, then .tweets_modified becomes the stripped 
-                        and lowercased tweets.
-    .tweets_modified    Where to find the stripped and lowercased tweets if you 
-                        ran .strip_and_lower with apply_on_copy = 0
-    .identify_spam()    Run this function to identify spam.
-    .spam_tweets        This is the spam tweets discovered by .identify_spam()
-    .spam_indices       This is the indices of the spam tweets in the original
-                        dataset that you fed into the class.
+    .tweets                 The original tweets that it took as input
+    .batch_size             How many tweets the spam detector looks through to 
+                            discover spam tweets.
+    .strip_and_lower()      If apply_on_copy is set to 1 (default) then it returns 
+                            stripped and lowercased tweets. Uses the singleTweet 
+                            class's strip_and_lower function. If apply_on_copy is 
+                            set to 0, then .tweets_modified becomes the stripped 
+                            and lowercased tweets.
+    .tweets_modified        Where to find the stripped and lowercased tweets if you 
+                            ran .strip_and_lower with apply_on_copy = 0
+    .identify_spam()        Run this function to identify spam.
+    .spam_tweets            This is the spam tweets discovered by .identify_spam()
+    .spam_indices           This is the indices of the spam tweets in the original
+                            dataset that you fed into the class.
+    .strip_and_lower_spam() Strips and lowercases spam, and sorts it so that 
+                            similar-looking spam tweets (sort of similar... just
+                            sorted) are side-by-side, so the structure is easier
+                            to see. Without this, it's easy to confuse computer-
+                            generated spam tweets for human ones.
+    .spam_tweets_stripped_and_lowered     The stripped and lowered spam tweets.
+                                          To get these, first run strip_and_lower_spam()
     """
 
     # Initialize some variables that need to be empty but will be updated by
@@ -130,9 +148,7 @@ class tweetDatabase:
     'beingsalmankhan', '10ronaldinho', 'charliesheen', 'google', 'nfl', 'waynerooney', \
     'claudialeitte', 'dalailam']
 
-    stop_words = text.ENGLISH_STOP_WORDS.union(common_twitter_handles)
-
-    def __init__(self, tweets, batch_size = 25000):
+    def __init__(self, tweets, batch_size = 50000):
         self.tweets = tweets
         self.batch_size = batch_size
 
@@ -154,7 +170,7 @@ class tweetDatabase:
         """Returns a list of tuples. Each tuple is a batch of tweets (length = batch_size)
         and those same tweets, stripped and lowercased. Each batch of tweets is a list."""
 
-        batches = int(self.math.ceil(len(all_tweets)/float(self.batch_size)))
+        batches = int(math.ceil(len(all_tweets)/float(self.batch_size)))
 
         list_of_batches = []
         start = 0
@@ -166,15 +182,12 @@ class tweetDatabase:
             else: 
                 tweet_batch = all_tweets[start:]
                 
-
             # Clean them up (lowercase everything, strip links, etc):
             stripped_lowered_tweets = self.strip_and_lower(tweets = tweet_batch, apply_on_copy = 1)
             
             list_of_batches.append((tweet_batch, stripped_lowered_tweets))
-            
-            
+
             start += self.batch_size
-            print "start = %r" % start
 
         return list_of_batches
 
@@ -187,7 +200,7 @@ class tweetDatabase:
         this function."""
 
         # Vectorize and fit tree:
-        vect2 = TfidfVectorizer(stop_words = self.stop_words)
+        vect2 = CountVectorizer(stop_words = self.common_twitter_handles)
         X2 = vect2.fit_transform(tweets)
         tree2 = LSHForest()
         tree2.fit(X2)
@@ -196,16 +209,12 @@ class tweetDatabase:
         n_neighbors = []
         neighbors_indices = []
         for x in vect2.transform(tweets):
-            if len(n_neighbors) % 100 == 0: print len(n_neighbors)
-            neighbors = tree2.radius_neighbors(x, radius = .28)[1]
+            if len(n_neighbors) % 100 == 0: print "%r tweets analyzed out of %r for this batch" % (len(n_neighbors), self.batch_size)
+            neighbors = tree2.radius_neighbors(x, radius = .3)[1]
             n_neighbors.append(len(neighbors[0]))
             neighbors_indices.append(neighbors)
 
-        # Find neighbors:
-        l = list(n_neighbors)
-        l = [l.index(x) for x in l if x > 2]
-
-        neighbors_indices = [x for x in range(len(neighbors_indices)) if len(neighbors_indices[x][0]) > 1]
+        neighbors_indices = [x for x in range(len(neighbors_indices)) if len(neighbors_indices[x][0]) > 2]
 
         return neighbors_indices
 
@@ -221,8 +230,8 @@ class tweetDatabase:
         batches = self.tweets_batch_maker(self.tweets)
         batch_num = 0
         for batch in batches:
+            print "NOW WORKING ON BATCH %r out of %r" % (batch_num + 1, len(batches))
             neighbors_indices = self.single_batch(batch[1])
-            print neighbors_indices
             self.spam_tweets.extend([self.tweets[t + batch_num*self.batch_size] for t in neighbors_indices])
             self.spam_indices.extend([x + batch_num*self.batch_size for x in neighbors_indices])
             batch_num += 1
@@ -246,22 +255,55 @@ client = MongoClient()
 db = client.tweets
 collect = db.test_collection #change this be the right collection!
 
-tweets = collect.find()
+found_tweets = collect.find()
+tweets = []
+for found in found_tweets:
+    tweets.append(found)
+tweets = tweets[140000:160000]
 
-# Get the first 10k tweets out of the mongo result. Only keep tweet text:
-tweet_db_main = []
-ind = 0
-for t in tweets:
-    ind +=1
-    if ind == 1000: break
-    tweet_db_main.append(t['text'])
+batch_sizes_to_try = [5000]
+seconds_per_tweet = []
+percent_spam_tweets = []
+for b in batch_sizes_to_try:
+    tweet_db_main = []
+    ind = 0
+    for t in tweets:
+        ind +=1
+        if ind == b: break
+        tweet_db_main.append(t['text'])
 
-test = tweetDatabase(tweets = tweet_db_main, batch_size = 1000)
-test.identify_spam()
-print len(test.spam_tweets)
+    import time
+    start = time.time()
+    test = tweetDatabase(tweets = tweet_db_main, batch_size = b)
+    test.identify_spam()
+    total_time = time.time() - start
+    seconds_per_tweet.append(total_time/float(b))
+
+    percent_spam = len(test.spam_tweets)/float(b)
+    percent_spam_tweets.append(percent_spam)
+
+from matplotlib import pyplot as plt
+
+# plt.plot(batch_sizes_to_try, seconds_per_tweet)
+# plt.title("Batch sizes vs seconds per tweet", fontsize = 16)
+# plt.xlabel("Batch sizes", fontsize = 15)
+# plt.ylabel("Seconds per tweet", fontsize = 15)
+# plt.savefig("fig1_overnight_2.png")
+
+# plt.plot(batch_sizes_to_try, percent_spam_tweets)
+# plt.title("Batch sizes vs percent spam tweets", fontsize = 16)
+# plt.xlabel("Batch sizes", fontsize = 15)
+# plt.ylabel("Percent spam tweets", fontsize = 15)
+# plt.savefig("fig2_overnight_2.png")
 
 test.strip_and_lower_spam()
-for x in test.spam_tweets_stripped_and_lowered:
-    print x
+print len(test.spam_tweets_stripped_and_lowered)
+# def strip_non_ascii(text):
+#     """Replaces all non-ascii characters in the tweet with a space. Returns
+#     tweet."""
 
+#     return ''.join([i if ord(i) < 128 else ' ' for i in text])
 
+# with open('testy.txt', 'w') as outfile:
+#     for x in test.spam_tweets_stripped_and_lowered:
+#         outfile.write(strip_non_ascii(x) + '\n')
