@@ -208,8 +208,9 @@ class tweetDatabase:
         # Build tree:
         n_neighbors = []
         neighbors_indices = []
+        working_batch_size = len(tweets)
         for x in vect2.transform(tweets):
-            if len(n_neighbors) % 100 == 0: print "%r tweets analyzed out of %r for this batch" % (len(n_neighbors), self.batch_size)
+            if len(n_neighbors) % 100 == 0: print "%r tweets analyzed out of %r for this batch" % (len(n_neighbors), working_batch_size)
             neighbors = tree2.radius_neighbors(x, radius = .3)[1]
             n_neighbors.append(len(neighbors[0]))
             neighbors_indices.append(neighbors)
@@ -259,28 +260,42 @@ found_tweets = collect.find()
 tweets = []
 for found in found_tweets:
     tweets.append(found)
-tweets = tweets[140000:160000]
+tweets = tweets[200000:350000]
+tweets = [x['text'] for x in tweets]
 
-batch_sizes_to_try = [5000]
-seconds_per_tweet = []
+def strip_non_ascii(text):
+    """Replaces all non-ascii characters in the tweet with a space. Returns
+    tweet."""
+
+    return ''.join([i if ord(i) < 128 else ' ' for i in text])
+
+# batch_sizes_to_try = [50000]
+# seconds_per_tweet = []
 percent_spam_tweets = []
-for b in batch_sizes_to_try:
-    tweet_db_main = []
-    ind = 0
-    for t in tweets:
-        ind +=1
-        if ind == b: break
-        tweet_db_main.append(t['text'])
+# for b in batch_sizes_to_try:
+    # tweet_db_main = []
+    # ind = 0
+    # for t in tweets:
+    #     ind +=1
+    #     if ind == b: break
+    #     tweet_db_main.append(t['text'])
 
-    import time
-    start = time.time()
-    test = tweetDatabase(tweets = tweet_db_main, batch_size = b)
-    test.identify_spam()
-    total_time = time.time() - start
-    seconds_per_tweet.append(total_time/float(b))
+import time
+start = time.time()
+test = tweetDatabase(tweets = tweets, batch_size = 50000)
+test.identify_spam()
+total_time = time.time() - start
+# seconds_per_tweet.append(total_time/float(b))
 
-    percent_spam = len(test.spam_tweets)/float(b)
-    percent_spam_tweets.append(percent_spam)
+percent_spam = len(test.spam_tweets)/float(len(tweets))
+percent_spam_tweets.append(percent_spam)
+
+test.strip_and_lower_spam()
+spam_count = len(test.spam_tweets_stripped_and_lowered)
+with open('overnight_test_3_total_spam_in_200k_tweets_with_50k_batches.txt', 'w') as outfile:
+    outfile.write('The total amount of spam in 200k tweets with 50k batches was %r\n' %spam_count)
+    for x in test.spam_tweets_stripped_and_lowered:
+        outfile.write(strip_non_ascii(x) + '\n')
 
 from matplotlib import pyplot as plt
 
@@ -296,13 +311,6 @@ from matplotlib import pyplot as plt
 # plt.ylabel("Percent spam tweets", fontsize = 15)
 # plt.savefig("fig2_overnight_2.png")
 
-test.strip_and_lower_spam()
-print len(test.spam_tweets_stripped_and_lowered)
-# def strip_non_ascii(text):
-#     """Replaces all non-ascii characters in the tweet with a space. Returns
-#     tweet."""
-
-#     return ''.join([i if ord(i) < 128 else ' ' for i in text])
 
 # with open('testy.txt', 'w') as outfile:
 #     for x in test.spam_tweets_stripped_and_lowered:
