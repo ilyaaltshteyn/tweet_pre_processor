@@ -38,7 +38,7 @@ class singleTweet:
         """Replaces all non-ascii characters in the tweet with a space. Returns
         tweet."""
 
-        return ''.join([i if ord(i) < 128 else ' ' for i in self.tweet])
+        self.tweet = ''.join([i if ord(i) < 128 else ' ' for i in self.tweet])
 
     punctuation = re.compile('[%s]' % re.escape(string.punctuation))
     punctuation_sans_hashtags = re.compile('[%s]' % 
@@ -76,11 +76,12 @@ class singleTweet:
 
         self.tweet = self.tweet.replace('\n', '')
 
-    def strip_and_lower(self):
+    def strip_and_lower(self, strip_non_ascii = 0):
         """Performs all stripping functions (including stripping non-ascii chars)
         and lowercases the tweet. Does NOT convert it to utf-8."""
 
-        self.strip_non_ascii()
+        if strip_non_ascii ==1:
+            self.strip_non_ascii()
         self.strip_links()
         self.lowercase()
         self.strip_punctuation()
